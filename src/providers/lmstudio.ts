@@ -18,9 +18,10 @@ const ModelsResponseSchema = z.object({
   data: z.array(ModelItemSchema).optional(),
 })
 
-async function detect(url: string) {
+async function detect(url: string, headers?: Record<string, string>) {
   try {
     const res = await fetch(url + "/lmstudio-greeting", {
+      headers,
       signal: AbortSignal.timeout(1000),
     })
     if (!res.ok) return false
@@ -32,8 +33,9 @@ async function detect(url: string) {
   }
 }
 
-async function probe(url: string): Promise<LocalModel[]> {
+async function probe(url: string, headers?: Record<string, string>): Promise<LocalModel[]> {
   const res = await fetch(url + "/api/v0/models", {
+    headers,
     signal: AbortSignal.timeout(1000),
   })
   if (!res.ok) throw new Error(`LM Studio probe failed: ${res.status}`)

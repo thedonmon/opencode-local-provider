@@ -10,28 +10,42 @@ import {
 } from "./constants"
 import {
   getConfiguredTargets,
+  getProviderApiKey,
   getProviderTargets,
+  resolveEnv,
   saveProviderTarget,
 } from "./config"
 import { buildConfig } from "./models"
 import { supportedProviderKinds } from "./providers"
-import { detect, probe } from "./probe"
+import { probe } from "./probe"
+import type { LocalTarget } from "./types"
 import { trimURL } from "./url"
 
 function validID(value: string) {
   return /^[a-z0-9][a-z0-9-_]*$/.test(value)
 }
 
-async function probeModels(provider?: Pick<Provider, "options" | "models">) {
+function errorMessage(e: unknown) {
+  return e instanceof Error ? e.message : String(e)
+}
+
+async function probeModels(
+  provider?: Pick<Provider, "options" | "models">,
+  onError?: (target: string, e: unknown) => Promise<void>,
+) {
   const list = getProviderTargets(provider)
   if (!Object.keys(list).length) return {}
+  const sharedKey = getProviderApiKey(provider)
 
   const all = await Promise.all(
     Object.entries(list).map(async ([id, item]) => {
       try {
-        const found = await probe(item.url, item.kind)
-        return buildConfig(id, item.url, found.models, (provider?.models ?? {}) as Record<string, never>)
-      } catch {
+        const found = await probe(item.url, item.kind, { ...item, apiKey: item.apiKey || sharedKey })
+        // OpenAI-compatible SDKs already send the provider-wide key, so only a
+        // target's own key needs to be added to its models.
+        return buildConfig(id, item.url, found.models, (provider?.models ?? {}) as Record<string, never>, item.apiKey)
+      } catch (e) {
+        await onError?.(id, e)
         return {}
       }
     }),
@@ -41,13 +55,16 @@ async function probeModels(provider?: Pick<Provider, "options" | "models">) {
 }
 
 export const LocalProviderPlugin: Plugin = async (ctx) => {
-  await ctx.client.app.log({
-    body: {
-      service: LOCAL_PLUGIN_SERVICE,
-      level: "info",
-      message: `Local Provider plugin loaded v${pkg.version}. Supported backends: ${supportedProviderKinds.join(", ")}`,
-    },
-  })
+  const log = (level: "info" | "warn" | "error", message: string) =>
+    ctx.client.app.log({
+      body: {
+        service: LOCAL_PLUGIN_SERVICE,
+        level,
+        message,
+      },
+    })
+
+  await log("info", `Local Provider plugin loaded v${pkg.version}. Supported backends: ${supportedProviderKinds.join(", ")}`)
 
   return {
     config: async (cfg) => {
@@ -65,17 +82,29 @@ export const LocalProviderPlugin: Plugin = async (ctx) => {
         name: provider.name ?? LOCAL_PROVIDER_NAME,
         npm: provider.npm ?? OPENAI_COMPATIBLE_NPM,
         options,
-        models: await probeModels({
-          options,
-          models: (provider as Provider).models,
-        }),
+        models: await probeModels(
+          {
+            options,
+            models: (provider as Provider).models,
+          },
+          async (target, e) => {
+            // Built-in default targets are expected to be offline most of the time.
+            if (!list[target]) return
+            await log("warn", `Target "${target}" probe failed: ${errorMessage(e)}`)
+          },
+        ),
       }
     },
     auth: {
       provider: LOCAL_PROVIDER_ID,
       methods: [
         {
-          type: "api",
+          // "oauth" is the only method type OpenCode passes to the plugin from
+          // both /connect and `opencode auth login`. /connect saves an "api"
+          // method's answers without calling the plugin, and the CLI adds an
+          // API key prompt the plugin never sees. "auto" finishes without a
+          // browser step.
+          type: "oauth",
           label: "Add Custom Target",
           prompts: [
             {
@@ -91,40 +120,63 @@ export const LocalProviderPlugin: Plugin = async (ctx) => {
             {
               type: "text",
               key: "baseURL",
-              message: "Enter your local provider URL",
+              message: "Enter the server URL",
               placeholder: "http://192.168.1.10:1234",
               validate(value) {
                 if (!trimURL(value ?? "")) return "URL is required"
               },
             },
+            {
+              type: "text",
+              key: "apiKey",
+              message: "Enter the server's API key, or {env:VAR} to read it from the environment. Leave empty if it has none",
+              placeholder: "no key",
+            },
+            {
+              type: "select",
+              key: "models",
+              message: "Which models should be listed?",
+              options: [
+                { label: "Loaded models only", value: "loaded" },
+                { label: "All models the server offers", value: "all", hint: "llama-swap loads them on demand" },
+              ],
+            },
           ],
           async authorize(input = {}) {
             const id = input.target?.trim() ?? ""
-            const raw = trimURL(input.baseURL ?? "")
+            const url = trimURL(input.baseURL ?? "")
+            const entered = input.apiKey?.trim() ?? ""
+            const apiKey = entered.toLowerCase() === "none" ? "" : entered
+            const includeUnloaded = input.models === "all"
+
+            let target: LocalTarget
             try {
-              if (!id || !validID(id) || !raw) {
-                throw new Error("Invalid target ID or URL")
-              }
-
-              const result = await probe(raw)
-              const kind = result.kind
-              await saveProviderTarget(ctx.serverUrl, ctx.client, id, raw, kind)
-
-              return {
-                type: "success" as const,
-                provider: LOCAL_PROVIDER_ID,
-                key: "",
-              }
+              if (!validID(id)) throw new Error("Target ID must use lowercase letters, numbers, - or _")
+              if (!url) throw new Error("URL is required")
+              // Probe before saving so a wrong URL or key fails right away.
+              const found = await probe(url, undefined, { apiKey: resolveEnv(apiKey), includeUnloaded })
+              target = { url, kind: found.kind, apiKey, includeUnloaded }
             } catch (e) {
-              const errorMessage = e instanceof Error ? e.message : String(e)
-              await ctx.client.app.log({
-                body: {
-                  service: LOCAL_PLUGIN_SERVICE,
-                  level: "error",
-                  message: `Authorization failed: ${errorMessage}`,
-                },
-              })
-              return { type: "failed" as const }
+              await log("error", `Add Custom Target failed: ${errorMessage(e)}`)
+              throw e
+            }
+
+            return {
+              url: "",
+              method: "auto" as const,
+              instructions: `Found ${target.kind} at ${url}. Saving target "${id}".`,
+              // Saving config restarts OpenCode's instances. Doing it here
+              // rather than in authorize() keeps /connect's pending login
+              // alive until this callback has been looked up.
+              async callback() {
+                try {
+                  await saveProviderTarget(ctx.serverUrl, ctx.client, id, target)
+                  return { type: "success" as const, provider: LOCAL_PROVIDER_ID, key: "" }
+                } catch (e) {
+                  await log("error", `Saving target "${id}" failed: ${errorMessage(e)}`)
+                  return { type: "failed" as const }
+                }
+              },
             }
           },
         },

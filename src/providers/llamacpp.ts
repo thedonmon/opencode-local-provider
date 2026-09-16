@@ -21,9 +21,10 @@ const ModelsResponseSchema = z.object({
     .optional(),
 })
 
-export async function runtimeContext(url: string) {
+export async function runtimeContext(url: string, headers?: Record<string, string>) {
   try {
     const propsRes = await fetch(url + "/props", {
+      headers,
       signal: AbortSignal.timeout(1000),
     })
     if (propsRes.ok) {
@@ -36,6 +37,7 @@ export async function runtimeContext(url: string) {
 
   try {
     const slotsRes = await fetch(url + "/slots", {
+      headers,
       signal: AbortSignal.timeout(1000),
     })
     if (slotsRes.ok) {
@@ -50,9 +52,10 @@ export async function runtimeContext(url: string) {
   return null
 }
 
-async function detect(url: string) {
+async function detect(url: string, headers?: Record<string, string>) {
   try {
     const res = await fetch(url, {
+      headers,
       signal: AbortSignal.timeout(1000),
     })
     if (!res.ok) return false
@@ -62,9 +65,10 @@ async function detect(url: string) {
   }
 }
 
-async function probe(url: string): Promise<LocalModel[]> {
-  const loadedContext = await runtimeContext(url)
+async function probe(url: string, headers?: Record<string, string>): Promise<LocalModel[]> {
+  const loadedContext = await runtimeContext(url, headers)
   const res = await fetch(url + "/v1/models", {
+    headers,
     signal: AbortSignal.timeout(1000),
   })
   if (!res.ok) throw new Error(`llama.cpp probe failed: ${res.status}`)

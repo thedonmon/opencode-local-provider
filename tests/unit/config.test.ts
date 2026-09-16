@@ -36,6 +36,35 @@ test("keeps configured targets explicit-only", () => {
   })
 })
 
+test("keeps a non-empty target api key", () => {
+  const targets = getConfiguredTargets({
+    options: {
+      targets: {
+        swap: {
+          url: "https://swap.example.com",
+          kind: "llamaswap",
+          apiKey: "secret",
+        },
+        open: {
+          url: "http://192.168.1.10:1234",
+          apiKey: "",
+        },
+      },
+    },
+  })
+
+  expect(targets).toEqual({
+    swap: {
+      url: "https://swap.example.com/v1",
+      kind: "llamaswap",
+      apiKey: "secret",
+    },
+    open: {
+      url: "http://192.168.1.10:1234/v1",
+    },
+  })
+})
+
 test("configured targets override defaults and suppress duplicate urls", () => {
   const targets = getProviderTargets({
     options: {

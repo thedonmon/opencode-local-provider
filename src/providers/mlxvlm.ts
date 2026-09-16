@@ -9,8 +9,9 @@ const HealthSchema = z.object({
   loaded_tool_parser: z.string().nullable().optional(),
 })
 
-async function runtimeHealth(url: string, timeout = 1000) {
+async function runtimeHealth(url: string, headers?: Record<string, string>, timeout = 1000) {
   const res = await fetch(url + "/health", {
+    headers,
     signal: AbortSignal.timeout(timeout),
   })
 
@@ -21,9 +22,10 @@ async function runtimeHealth(url: string, timeout = 1000) {
   return HealthSchema.parse(await res.json())
 }
 
-async function detect(url: string) {
+async function detect(url: string, headers?: Record<string, string>) {
   try {
     const res = await fetch(url + "/health", {
+      headers,
       signal: AbortSignal.timeout(1000),
     })
 
@@ -37,8 +39,8 @@ async function detect(url: string) {
   }
 }
 
-async function probe(url: string): Promise<LocalModel[]> {
-  const health = await runtimeHealth(url)
+async function probe(url: string, headers?: Record<string, string>): Promise<LocalModel[]> {
+  const health = await runtimeHealth(url, headers)
   if (!health) {
     throw new Error("MLX-VLM probe failed: health endpoint unavailable")
   }

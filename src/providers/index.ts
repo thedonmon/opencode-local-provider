@@ -7,6 +7,7 @@ import lmstudio from "./lmstudio"
 import mlxvlm from "./mlxvlm"
 import ollama from "./ollama"
 import omlx from "./omlx"
+import openai from "./openai"
 import type { ProviderMap } from "./shared"
 import vllm from "./vllm"
 
@@ -19,9 +20,12 @@ export const supportedProviders: ProviderMap = {
   llamaswap,
   omlx,
   mlxvlm,
+  openai,
 }
 
-export const supportedProviderDefaultURLs: Record<LocalProviderKind, string> = {
+// The generic OpenAI-compatible fallback has no well-known port, so it is
+// only used for explicit targets.
+export const supportedProviderDefaultURLs: Partial<Record<LocalProviderKind, string>> = {
   ollama: "http://127.0.0.1:11434",
   lmstudio: "http://127.0.0.1:1234",
   llamacpp: "http://127.0.0.1:8080",

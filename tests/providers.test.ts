@@ -94,8 +94,11 @@ afterAll(() => {
   compose?.down()
 }, 120_000)
 
+// "openai" is the generic fallback that every suite server also satisfies.
+const backendKinds = supportedProviderKinds.filter((kind) => kind !== "openai")
+
 test("supported providers list stays in sync", () => {
-  expect(supportedProviderKinds).toEqual(suites.map((item) => item.kind))
+  expect(backendKinds).toEqual(suites.map((item) => item.kind))
 })
 
 describe("provider integration", () => {
@@ -115,7 +118,7 @@ describe("provider integration", () => {
     }, 120_000)
 
     test(`${item.kind} reports the expected context length`, async () => {
-      const result = await probe(item.url(), undefined, item.kind)
+      const result = await probe(item.url(), item.kind)
 
       const model = item.modelID ? result.models.find((entry) => entry.id === item.modelID) : result.models[0]
 
@@ -135,8 +138,16 @@ describe("provider integration", () => {
       }
     }, 120_000)
 
+    test(`${item.kind} also probes as a generic OpenAI-compatible server`, async () => {
+      const result = await probe(item.url(), "openai")
+      expect(result.kind).toBe("openai")
+      if (item.modelID) {
+        expect(result.models.some((entry) => entry.id === item.modelID)).toBe(true)
+      }
+    }, 120_000)
+
     test(`${item.kind} probes when kind is supplied`, async () => {
-      const result = await probe(item.url(), undefined, item.kind)
+      const result = await probe(item.url(), item.kind)
       expect(result.kind).toBe(item.kind)
       if (item.modelID) {
         expect(result.models.some((entry) => entry.id === item.modelID)).toBe(true)
@@ -151,7 +162,7 @@ describe("provider integration", () => {
       for (const [otherKind, otherProvider] of Object.entries(supportedProviders)) {
         if (otherKind === item.kind) continue
         const otherDefaultURL = supportedProviderDefaultURLs[otherKind as LocalProviderKind]
-        if (String(new URL(otherDefaultURL).port) !== String(item.port)) continue
+        if (!otherDefaultURL || String(new URL(otherDefaultURL).port) !== String(item.port)) continue
 
         expect(await otherProvider.detect(rootURL(item.url()))).toBe(false)
       }
@@ -160,10 +171,10 @@ describe("provider integration", () => {
 
   test("probe with explicit kind rejects mismatched server", async () => {
     for (const item of activeSuites) {
-      for (const otherKind of supportedProviderKinds) {
+      for (const otherKind of backendKinds) {
         if (otherKind === item.kind) continue
         const otherDefaultURL = supportedProviderDefaultURLs[otherKind]
-        if (String(new URL(otherDefaultURL).port) !== String(item.port)) continue
+        if (!otherDefaultURL || String(new URL(otherDefaultURL).port) !== String(item.port)) continue
 
         await expect(probe(item.url(), otherKind)).rejects.toThrow()
       }

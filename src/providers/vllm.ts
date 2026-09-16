@@ -14,9 +14,10 @@ const ModelsResponseSchema = z.object({
     .optional(),
 })
 
-async function detect(url: string) {
+async function detect(url: string, headers?: Record<string, string>) {
   try {
     const res = await fetch(url + "/v1/models", {
+      headers,
       signal: AbortSignal.timeout(1000),
     })
     if (!res.ok) return false
@@ -31,8 +32,9 @@ async function detect(url: string) {
   }
 }
 
-async function probe(url: string): Promise<LocalModel[]> {
+async function probe(url: string, headers?: Record<string, string>): Promise<LocalModel[]> {
   const res = await fetch(url + "/v1/models", {
+    headers,
     signal: AbortSignal.timeout(1000),
   })
   if (!res.ok) throw new Error(`vLLM probe failed: ${res.status}`)

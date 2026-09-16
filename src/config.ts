@@ -32,20 +32,19 @@ function createV2OpencodeClient(url: URL, input: PluginInput["client"]) {
   })
 }
 
-export function getAuthApiKey(auth?: { type: string; key?: string }) {
-  if (!auth || auth.type !== "api") return ""
-  return auth.key ?? ""
-}
-
 function parseTargetConfig(item: unknown) {
   if (typeof item === "string" && item) return { url: baseURL(item) }
   if (item && typeof item === "object") {
     const url = "url" in item ? item.url : undefined
     const kind = "kind" in item ? item.kind : undefined
+    const apiKey = "apiKey" in item ? item.apiKey : undefined
+    const includeUnloaded = "includeUnloaded" in item ? item.includeUnloaded : undefined
     if (typeof url === "string" && url) {
       return {
         url: baseURL(url),
         ...(typeof kind === "string" && KINDS.includes(kind as (typeof KINDS)[number]) ? { kind } : {}),
+        ...(typeof apiKey === "string" && apiKey ? { apiKey } : {}),
+        ...(includeUnloaded === true ? { includeUnloaded } : {}),
       }
     }
   }
@@ -55,7 +54,7 @@ const defaults = Object.fromEntries(
   Object.entries(supportedProviderDefaultURLs).map(([id, url]) => [
     id,
     {
-      url: baseURL(url),
+      url: baseURL(url!),
       kind: id as LocalTarget["kind"],
     },
   ]),
@@ -103,47 +102,42 @@ export function getProviderTargets(provider?: Pick<Provider, "options">) {
   }
 }
 
-export function getProviderApiKey(provider?: Pick<Provider, "options">, auth?: { type: string; key?: string }) {
+// A provider-wide `options.apiKey` is what OpenCode itself sends to every
+// model of the provider, so probes fall back to it when a target has no key.
+export function getProviderApiKey(provider?: Pick<Provider, "options">) {
   const val = provider?.options?.apiKey
-  if (typeof val === "string" && val) return val
-  return getAuthApiKey(auth)
+  return typeof val === "string" ? val : ""
 }
 
-export async function getCurrentProviderConfig(url: URL, input: PluginInput["client"]) {
-  const cfg = await createV2OpencodeClient(url, input).global.config.get()
-  const provider = cfg.data?.provider?.[LOCAL_PROVIDER_ID]
-  return {
-    targets: getConfiguredTargets(provider as Pick<Provider, "options"> | undefined),
-    key: typeof provider?.options?.apiKey === "string" ? provider.options.apiKey : "",
-  }
+// Resolve `{env:VAR}` the same way OpenCode does when it loads config, for
+// values that have not been through config loading yet (CLI prompt input).
+export function resolveEnv(value: string) {
+  return value.replace(/\{env:([^}]+)\}/g, (_, name: string) => process.env[name] || "")
 }
 
 export async function saveProviderTarget(
   server: URL,
   input: PluginInput["client"],
   id: string,
-  url: string,
-  kind?: LocalTarget["kind"],
-  key?: string,
+  target: LocalTarget,
 ) {
-  const cur = await getCurrentProviderConfig(server, input)
-  const options: Record<string, unknown> = {
-    targets: {
-      ...cur.targets,
-      [id]: {
-        url: baseURL(url),
-        ...(kind ? { kind } : {}),
-      },
-    },
-  }
-
-  if (key !== undefined) options.apiKey = key
-
+  // The global config update deep-merges into the config file, so only the
+  // new target is sent. Re-sending the others would replace any `{env:VAR}`
+  // references in them with the resolved values.
   await createV2OpencodeClient(server, input).global.config.update({
     config: {
       provider: {
         [LOCAL_PROVIDER_ID]: {
-          options,
+          options: {
+            targets: {
+              [id]: {
+                url: baseURL(target.url),
+                ...(target.kind ? { kind: target.kind } : {}),
+                ...(target.apiKey ? { apiKey: target.apiKey } : {}),
+                includeUnloaded: target.includeUnloaded === true,
+              },
+            },
+          },
         },
       },
     },

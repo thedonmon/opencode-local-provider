@@ -18,9 +18,10 @@ const ShowResponseSchema = z.object({
   capabilities: z.array(z.string()).optional(),
 })
 
-async function detect(url: string) {
+async function detect(url: string, headers?: Record<string, string>) {
   try {
     const res = await fetch(url, {
+      headers,
       signal: AbortSignal.timeout(1000),
     })
     if (!res.ok) return false
@@ -30,11 +31,12 @@ async function detect(url: string) {
   }
 }
 
-async function show(url: string, model: string) {
+async function show(url: string, model: string, headers?: Record<string, string>) {
   try {
     const res = await fetch(url + "/api/show", {
       method: "POST",
       headers: {
+        ...headers,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ model }),
@@ -47,8 +49,9 @@ async function show(url: string, model: string) {
   }
 }
 
-async function probe(url: string): Promise<LocalModel[]> {
+async function probe(url: string, headers?: Record<string, string>): Promise<LocalModel[]> {
   const res = await fetch(url + "/api/ps", {
+    headers,
     signal: AbortSignal.timeout(1000),
   })
   if (!res.ok) throw new Error(`Ollama probe failed: ${res.status}`)
@@ -57,7 +60,7 @@ async function probe(url: string): Promise<LocalModel[]> {
 
   return Promise.all(
     body.models.map(async (item) => {
-      const extra = await show(url, item.model)
+      const extra = await show(url, item.model, headers)
       return {
         id: item.name,
         context: item.context_length,

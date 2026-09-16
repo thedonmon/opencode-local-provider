@@ -1,18 +1,8 @@
 import { z } from "zod"
-import type { LocalModel } from "../types"
+import type { LocalModel, LocalTarget } from "../types"
 import type { ProviderImpl } from "./shared"
 import { runtimeContext } from "./llamacpp"
-
-const ModelsResponseSchema = z.object({
-  data: z
-    .array(
-      z.object({
-        id: z.string(),
-        owned_by: z.string().optional(),
-      }),
-    )
-    .optional(),
-})
+import { listModels, modelFromListing } from "./openai"
 
 const RunningResponseSchema = z.object({
   running: z
@@ -25,9 +15,10 @@ const RunningResponseSchema = z.object({
     .optional(),
 })
 
-export async function runningModels(url: string) {
+export async function runningModels(url: string, headers?: Record<string, string>) {
   try {
     const res = await fetch(url + "/running", {
+      headers,
       signal: AbortSignal.timeout(1000),
     })
     if (!res.ok) return new Set<string>()
@@ -42,43 +33,30 @@ export async function runningModels(url: string) {
   }
 }
 
-async function detect(url: string) {
+async function detect(url: string, headers?: Record<string, string>) {
   try {
     // llama-swap exposes /v1/models for all configured models regardless of load state.
     // We check owned_by to distinguish it from other OpenAI-compatible proxies.
-    const res = await fetch(url + "/v1/models", {
-      signal: AbortSignal.timeout(1000),
-    })
-    if (!res.ok) return false
-    const parsed = ModelsResponseSchema.safeParse(await res.json())
-    if (!parsed.success) return false
-    const data = parsed.data.data
-    if (!data) return false
+    const data = await listModels(url, headers)
     return data.some((item) => item.owned_by === "llama-swap")
   } catch {
     return false
   }
 }
 
-async function probe(url: string): Promise<LocalModel[]> {
-  const res = await fetch(url + "/v1/models", {
-    signal: AbortSignal.timeout(1000),
-  })
-  if (!res.ok) throw new Error(`llama-swap probe failed: ${res.status}`)
-  const body = ModelsResponseSchema.parse(await res.json())
-  if (!body.data) throw new Error("llama-swap probe failed: no data field")
-  const loadedModels = await runningModels(url)
+async function probe(url: string, headers?: Record<string, string>, target?: LocalTarget): Promise<LocalModel[]> {
+  const listed = await listModels(url, headers)
+  const loadedModels = await runningModels(url, headers)
+  const models = target?.includeUnloaded ? listed : listed.filter((item) => loadedModels.has(item.id))
 
   return Promise.all(
-    body.data.filter((item) => loadedModels.has(item.id)).map(async (item) => {
-      const context = (await runtimeContext(`${url}/upstream/${item.id}`)) ?? 0
-
-      return {
-        id: item.id,
-        context,
-        toolcall: false,
-        vision: false,
-      }
+    models.map(async (item) => {
+      const model = modelFromListing(item)
+      // Querying /upstream makes llama-swap load the model, so only running
+      // models get their live context size. The rest keep the listing metadata.
+      if (!loadedModels.has(item.id)) return model
+      const context = await runtimeContext(`${url}/upstream/${item.id}`, headers)
+      return context ? { ...model, context } : model
     }),
   )
 }

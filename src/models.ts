@@ -2,7 +2,7 @@ import type { Model } from "@opencode-ai/sdk/v2"
 
 import { DEFAULT_CONTEXT, DEFAULT_OUTPUT, OPENAI_COMPATIBLE_NPM } from "./constants"
 import type { LocalModel } from "./types"
-import { baseURL } from "./url"
+import { authHeaders, baseURL } from "./url"
 
 type Modality = "text" | "audio" | "image" | "video" | "pdf"
 
@@ -33,8 +33,8 @@ function id(target: string, model: string) {
   return `${target}/${model}`
 }
 
-function name(target: string, model: string) {
-  return `${model} (${target})`
+function name(target: string, model: LocalModel) {
+  return `${model.name ?? model.id} (${target})`
 }
 
 function modalities(model: LocalModel): { input: Modality[]; output: Modality[] } {
@@ -57,7 +57,7 @@ function item(providerID: string, target: string, url: string, model: LocalModel
       url: baseURL(url),
       npm: prev?.api.npm ?? OPENAI_COMPATIBLE_NPM,
     },
-    name: prev?.name ?? name(target, model.id),
+    name: prev?.name ?? name(target, model),
     family: prev?.family ?? "",
     capabilities: {
       temperature: prev?.capabilities.temperature ?? true,
@@ -100,11 +100,11 @@ function item(providerID: string, target: string, url: string, model: LocalModel
   }
 }
 
-function configItem(target: string, url: string, model: LocalModel, prev?: ConfigModel) {
+function configItem(target: string, url: string, model: LocalModel, prev?: ConfigModel, apiKey?: string) {
   const attach = model.vision || prev?.attachment || false
   return {
     id: model.id,
-    name: prev?.name ?? name(target, model.id),
+    name: prev?.name ?? name(target, model),
     family: prev?.family || undefined,
     release_date: prev?.release_date || undefined,
     attachment: attach,
@@ -124,7 +124,14 @@ function configItem(target: string, url: string, model: LocalModel, prev?: Confi
       ...prev?.options,
       target,
     },
-    headers: prev?.headers ?? {},
+    // OpenAI-compatible SDKs send model headers on every request, which is how
+    // each target gets its own key under the single `local` provider. The
+    // target key goes last so a header injected by an earlier run can't
+    // outlive a key change.
+    headers: {
+      ...prev?.headers,
+      ...authHeaders(apiKey),
+    },
     provider: {
       npm: prev?.provider?.npm ?? OPENAI_COMPATIBLE_NPM,
       api: baseURL(url),
@@ -141,11 +148,17 @@ export function build(providerID: string, target: string, url: string, list: Loc
   )
 }
 
-export function buildConfig(target: string, url: string, list: LocalModel[], prev: Record<string, ConfigModel>) {
+export function buildConfig(
+  target: string,
+  url: string,
+  list: LocalModel[],
+  prev: Record<string, ConfigModel>,
+  apiKey?: string,
+) {
   return Object.fromEntries(
     list.map((model) => {
       const key = id(target, model.id)
-      return [key, configItem(target, url, model, prev[key])]
+      return [key, configItem(target, url, model, prev[key], apiKey)]
     }),
   )
 }
