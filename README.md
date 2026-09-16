@@ -1,5 +1,7 @@
 # *opencode-local-provider* OpenCode Plugin
 
+> Fork of [goniz/opencode-local-provider](https://github.com/goniz/opencode-local-provider), published as `@0xdon0/opencode-local-provider`. It adds optional per-server API keys, adding servers from `/connect`, listing every llama-swap model, and a fallback for any OpenAI-compatible server. Don't install it alongside the original package.
+
 OpenCode plugin that adds a single `local` provider with runtime model detection for local OpenAI-compatible servers.
 
 It currently supports the following local backends:
@@ -32,7 +34,7 @@ https://github.com/user-attachments/assets/8693fd22-c311-4cb4-913b-93d5a531b23c
 ## Install
 
 ```bash
-opencode plugin --global opencode-local-provider
+opencode plugin --global @0xdon0/opencode-local-provider
 ```
 
 OpenCode will install the package and update the config for you.

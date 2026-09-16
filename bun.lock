@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "opencode-local-provider",
+      "name": "@0xdon0/opencode-local-provider",
       "dependencies": {
         "@opencode-ai/plugin": "^1.18.31",
         "@opencode-ai/sdk": "^1.18.31",
