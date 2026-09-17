@@ -6,6 +6,8 @@ const PropsSchema = z.object({
   default_generation_settings: z
     .object({ n_ctx: z.number().optional() })
     .optional(),
+  modalities: z.object({ vision: z.boolean().optional() }).nullish(),
+  chat_template_caps: z.object({ supports_tools: z.boolean().optional() }).nullish(),
 })
 
 const SlotsSchema = z.array(z.object({ n_ctx: z.number().optional() }))
@@ -21,7 +23,15 @@ const ModelsResponseSchema = z.object({
     .optional(),
 })
 
-export async function runtimeContext(url: string, headers?: Record<string, string>) {
+export type RuntimeInfo = {
+  context?: number
+  vision?: boolean
+  toolcall?: boolean
+}
+
+// What a running llama-server reports about the model it has loaded.
+export async function runtimeInfo(url: string, headers?: Record<string, string>): Promise<RuntimeInfo> {
+  const info: RuntimeInfo = {}
   try {
     const propsRes = await fetch(url + "/props", {
       headers,
@@ -29,12 +39,24 @@ export async function runtimeContext(url: string, headers?: Record<string, strin
     })
     if (propsRes.ok) {
       const parsed = PropsSchema.parse(await propsRes.json())
+      info.vision = parsed.modalities?.vision
+      info.toolcall = parsed.chat_template_caps?.supports_tools
       if (parsed.default_generation_settings?.n_ctx) {
-        return parsed.default_generation_settings.n_ctx
+        info.context = parsed.default_generation_settings.n_ctx
+        return info
       }
     }
   } catch {}
 
+  const context = await slotsContext(url, headers)
+  return context ? { ...info, context } : info
+}
+
+export async function runtimeContext(url: string, headers?: Record<string, string>) {
+  return (await runtimeInfo(url, headers)).context ?? null
+}
+
+async function slotsContext(url: string, headers?: Record<string, string>) {
   try {
     const slotsRes = await fetch(url + "/slots", {
       headers,

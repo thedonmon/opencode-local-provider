@@ -37,6 +37,8 @@ describe("llama-swap provider", () => {
         return new Response(
           JSON.stringify({
             default_generation_settings: { n_ctx: 4096 },
+            modalities: { vision: true, audio: false },
+            chat_template_caps: { supports_tools: true },
           }),
           { status: 200, headers: { "content-type": "application/json" } },
         )
@@ -58,7 +60,7 @@ describe("llama-swap provider", () => {
       expect(await runningModels("http://llamaswap.test")).toEqual(new Set(["loaded"]))
       expect(result.kind).toBe("llamaswap")
       expect(result.models).toEqual([
-        { id: "loaded", context: 4096, toolcall: false, vision: false },
+        { id: "loaded", context: 4096, toolcall: true, vision: true, live: true },
       ])
       expect(calls).toContain("http://llamaswap.test/upstream/loaded/props")
       expect(calls).not.toContain("http://llamaswap.test/upstream/idle/props")
@@ -68,7 +70,7 @@ describe("llama-swap provider", () => {
     }
   })
 
-  test("lists unloaded models from /v1/models without loading them", async () => {
+  test("lists unloaded chat models from /v1/models without loading them", async () => {
     const calls: string[] = []
     const originalFetch = globalThis.fetch
 
@@ -80,6 +82,12 @@ describe("llama-swap provider", () => {
         return Response.json({
           data: [
             { id: "loaded", owned_by: "llama-swap", context_length: 4096 },
+            {
+              id: "whisper",
+              owned_by: "llama-swap",
+              architecture: { input_modalities: ["audio"], output_modalities: ["text"] },
+              capabilities: { audio_transcriptions: true },
+            },
             {
               id: "idle",
               owned_by: "llama-swap",
@@ -107,7 +115,7 @@ describe("llama-swap provider", () => {
       const result = await probe("http://llamaswap.test", "llamaswap", { includeUnloaded: true })
 
       expect(result.models).toEqual([
-        { id: "loaded", context: 2048, toolcall: false, vision: false },
+        { id: "loaded", context: 2048, toolcall: false, vision: false, live: true },
         { id: "idle", name: "Idle Model", context: 32768, toolcall: true, vision: true },
       ])
       expect(calls.some((url) => url.includes("/upstream/idle"))).toBe(false)
@@ -152,7 +160,7 @@ describe("llama-swap provider", () => {
 
       expect(result.kind).toBe("llamaswap")
       expect(result.models).toEqual([
-        { id: "loaded", context: 8192, toolcall: false, vision: false },
+        { id: "loaded", context: 8192, toolcall: false, vision: false, live: true },
       ])
       expect(calls).toContain("http://llamaswap.test/running")
       expect(calls).toContain("http://llamaswap.test/upstream/loaded/props")

@@ -5,4 +5,5 @@ export const LOCAL_PLUGIN_SERVICE = "opencode-local-provider"
 export const OPENAI_COMPATIBLE_NPM = "@ai-sdk/openai-compatible"
 export const LEGACY_TARGET_ID = "default"
 export const DEFAULT_CONTEXT = 32768
-export const DEFAULT_OUTPUT = 8192
+// OpenCode never asks for more output than this per request.
+export const MAX_OUTPUT = 32_000

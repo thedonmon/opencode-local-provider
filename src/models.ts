@@ -1,31 +1,35 @@
 import type { Model } from "@opencode-ai/sdk/v2"
 
-import { DEFAULT_CONTEXT, DEFAULT_OUTPUT, OPENAI_COMPATIBLE_NPM } from "./constants"
+import { DEFAULT_CONTEXT, MAX_OUTPUT, OPENAI_COMPATIBLE_NPM } from "./constants"
 import type { LocalModel } from "./types"
 import { authHeaders, baseURL } from "./url"
 
 type Modality = "text" | "audio" | "image" | "video" | "pdf"
 
+// A model entry from the user's `provider.local.models` config. Every field
+// set there wins over what the probe found.
 type ConfigModel = {
+  id?: string
   name?: string
-  family?: string
-  release_date?: string
   attachment?: boolean
-  reasoning?: boolean
-  temperature?: boolean
-  interleaved?: true | { field: "reasoning_content" | "reasoning_details" }
+  tool_call?: boolean
+  limit?: { context: number; input?: number; output: number }
+  modalities?: { input?: Modality[]; output?: Modality[] }
   options?: Record<string, unknown>
   headers?: Record<string, string>
   provider?: {
     npm?: string
   }
+  [key: string]: unknown
 }
 
 function limits(input: number) {
   const context = input > 0 ? input : DEFAULT_CONTEXT
+  // A quarter of the context leaves room for long answers and reasoning while
+  // keeping most of it for the conversation.
   return {
     context,
-    output: Math.min(context, DEFAULT_OUTPUT),
+    output: Math.min(MAX_OUTPUT, Math.floor(context / 4)),
   }
 }
 
@@ -100,18 +104,13 @@ function item(providerID: string, target: string, url: string, model: LocalModel
   }
 }
 
-function configItem(target: string, url: string, model: LocalModel, prev?: ConfigModel, apiKey?: string) {
-  const attach = model.vision || prev?.attachment || false
+function configItem(target: string, url: string, model: LocalModel, prev: ConfigModel = {}, apiKey?: string) {
+  const probed = modalities(model)
+  const input = prev.modalities?.input ?? probed.input
   return {
-    id: model.id,
-    name: prev?.name ?? name(target, model),
-    family: prev?.family || undefined,
-    release_date: prev?.release_date || undefined,
-    attachment: attach,
-    ...(prev?.reasoning ? { reasoning: true } : {}),
-    temperature: prev?.temperature ?? true,
+    name: name(target, model),
+    temperature: true,
     ...(model.toolcall ? { tool_call: true } : {}),
-    ...(prev?.interleaved ? { interleaved: prev.interleaved } : {}),
     cost: {
       input: 0,
       output: 0,
@@ -119,9 +118,15 @@ function configItem(target: string, url: string, model: LocalModel, prev?: Confi
       cache_write: 0,
     },
     limit: limits(model.context),
-    modalities: modalities(model),
+    ...prev,
+    id: prev.id ?? model.id,
+    attachment: prev.attachment ?? input.includes("image"),
+    modalities: {
+      input,
+      output: prev.modalities?.output ?? probed.output,
+    },
     options: {
-      ...prev?.options,
+      ...prev.options,
       target,
     },
     // OpenAI-compatible SDKs send model headers on every request, which is how
@@ -129,11 +134,11 @@ function configItem(target: string, url: string, model: LocalModel, prev?: Confi
     // target key goes last so a header injected by an earlier run can't
     // outlive a key change.
     headers: {
-      ...prev?.headers,
+      ...prev.headers,
       ...authHeaders(apiKey),
     },
     provider: {
-      npm: prev?.provider?.npm ?? OPENAI_COMPATIBLE_NPM,
+      npm: prev.provider?.npm ?? OPENAI_COMPATIBLE_NPM,
       api: baseURL(url),
     },
   }

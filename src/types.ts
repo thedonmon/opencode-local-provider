@@ -10,6 +10,9 @@ export type LocalModel = {
   context: number
   toolcall: boolean
   vision: boolean
+  // Read from the running server rather than a listing, so it can be
+  // remembered for when the model is unloaded.
+  live?: boolean
 }
 
 export type LocalTarget = {

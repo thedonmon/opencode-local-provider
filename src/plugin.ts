@@ -15,6 +15,7 @@ import {
   resolveEnv,
   saveProviderTarget,
 } from "./config"
+import { loadModelCache, rememberModels, saveModelCache } from "./cache"
 import { buildConfig } from "./models"
 import { supportedProviderKinds } from "./providers"
 import { probe } from "./probe"
@@ -36,14 +37,18 @@ async function probeModels(
   const list = getProviderTargets(provider)
   if (!Object.keys(list).length) return {}
   const sharedKey = getProviderApiKey(provider)
+  const cache = await loadModelCache()
+  let cacheChanged = false
 
   const all = await Promise.all(
     Object.entries(list).map(async ([id, item]) => {
       try {
         const found = await probe(item.url, item.kind, { ...item, apiKey: item.apiKey || sharedKey })
+        const remembered = rememberModels(cache, item.url, found.models)
+        cacheChanged ||= remembered.changed
         // OpenAI-compatible SDKs already send the provider-wide key, so only a
         // target's own key needs to be added to its models.
-        return buildConfig(id, item.url, found.models, (provider?.models ?? {}) as Record<string, never>, item.apiKey)
+        return buildConfig(id, item.url, remembered.models, (provider?.models ?? {}) as Record<string, never>, item.apiKey)
       } catch (e) {
         await onError?.(id, e)
         return {}
@@ -51,6 +56,7 @@ async function probeModels(
     }),
   )
 
+  if (cacheChanged) await saveModelCache(cache)
   return Object.assign({}, ...all)
 }
 
@@ -68,8 +74,7 @@ export const LocalProviderPlugin: Plugin = async (ctx) => {
 
   return {
     config: async (cfg) => {
-      cfg.provider ??= {}
-      const provider = cfg.provider[LOCAL_PROVIDER_ID] ?? {}
+      const provider = cfg.provider?.[LOCAL_PROVIDER_ID] ?? {}
       const list = getConfiguredTargets(provider as Provider)
       const options = {
         ...provider.options,
@@ -77,6 +82,11 @@ export const LocalProviderPlugin: Plugin = async (ctx) => {
         targets: list,
       }
       delete options.baseURL
+      // OpenCode can share nested config objects with its cached global
+      // config, so replace `provider` rather than writing into it. Otherwise
+      // the next instance would read these generated models back as the
+      // user's own model settings.
+      cfg.provider = { ...cfg.provider }
       cfg.provider[LOCAL_PROVIDER_ID] = {
         ...provider,
         name: provider.name ?? LOCAL_PROVIDER_NAME,

@@ -1,8 +1,8 @@
 import { z } from "zod"
 import type { LocalModel, LocalTarget } from "../types"
 import type { ProviderImpl } from "./shared"
-import { runtimeContext } from "./llamacpp"
-import { listModels, modelFromListing } from "./openai"
+import { runtimeInfo } from "./llamacpp"
+import { isChatModel, listModels, modelFromListing } from "./openai"
 
 const RunningResponseSchema = z.object({
   running: z
@@ -45,7 +45,7 @@ async function detect(url: string, headers?: Record<string, string>) {
 }
 
 async function probe(url: string, headers?: Record<string, string>, target?: LocalTarget): Promise<LocalModel[]> {
-  const listed = await listModels(url, headers)
+  const listed = (await listModels(url, headers)).filter(isChatModel)
   const loadedModels = await runningModels(url, headers)
   const models = target?.includeUnloaded ? listed : listed.filter((item) => loadedModels.has(item.id))
 
@@ -53,10 +53,17 @@ async function probe(url: string, headers?: Record<string, string>, target?: Loc
     models.map(async (item) => {
       const model = modelFromListing(item)
       // Querying /upstream makes llama-swap load the model, so only running
-      // models get their live context size. The rest keep the listing metadata.
+      // models are asked directly. The rest keep the listing metadata.
       if (!loadedModels.has(item.id)) return model
-      const context = await runtimeContext(`${url}/upstream/${item.id}`, headers)
-      return context ? { ...model, context } : model
+      const running = await runtimeInfo(`${url}/upstream/${item.id}`, headers)
+      if (!running.context) return model
+      return {
+        ...model,
+        context: running.context,
+        toolcall: running.toolcall ?? model.toolcall,
+        vision: running.vision ?? model.vision,
+        live: true,
+      }
     }),
   )
 }

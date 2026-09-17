@@ -1,7 +1,7 @@
 import { describe, expect, mock, test } from "bun:test"
 
 import { probe } from "../../src/probe"
-import { modelFromListing } from "../../src/providers/openai"
+import { isChatModel, modelFromListing } from "../../src/providers/openai"
 
 function mockFetch(routes: Record<string, unknown>, calls: string[] = []) {
   return mock(async (input: string | URL | Request) => {
@@ -47,6 +47,15 @@ describe("OpenAI-compatible model listing", () => {
         meta: null,
       }),
     ).toEqual({ id: "plain", context: 0, toolcall: false, vision: false })
+  })
+
+  test("only keeps models that chat in text", () => {
+    expect(isChatModel({ id: "plain" })).toBe(true)
+    expect(isChatModel({ id: "vl", architecture: { input_modalities: ["text", "image"], output_modalities: ["text"] } })).toBe(true)
+    expect(isChatModel({ id: "whisper", architecture: { input_modalities: ["audio"], output_modalities: ["text"] } })).toBe(false)
+    expect(isChatModel({ id: "tts", architecture: { input_modalities: ["text"], output_modalities: ["audio"] } })).toBe(false)
+    expect(isChatModel({ id: "rerank", capabilities: { reranker: true } })).toBe(false)
+    expect(isChatModel({ id: "embed", capabilities: ["embedding"] })).toBe(false)
   })
 })
 

@@ -123,6 +123,63 @@ To avoid collisions, model IDs are prefixed with the target ID:
 
 Each generated model keeps its own target URL and API key internally, so requests go to the correct backend.
 
+Models that don't chat in text, such as speech-to-text, rerankers, or embeddings, are skipped when the server's listing says so.
+
+## Context Size and Model Settings
+
+OpenCode compacts a conversation once it nears the model's context size, so each model needs the right one. The plugin uses the first of these that it finds:
+
+1. Settings for the model in your OpenCode config (see below)
+2. What the running server reports: llama.cpp, or a llama-swap model that is currently loaded
+3. The server's `/v1/models` listing (`context_length`, `context_window`, `max_model_len` or `meta.n_ctx`)
+4. What a llama-swap model reported the last time it was loaded when OpenCode started. These values are kept in `~/.cache/opencode-local-provider/models.json`
+5. 32,768 tokens
+
+The output limit is a quarter of the context, capped at 32,000 tokens. Sizes are read when OpenCode starts, so restart it to pick up changes.
+
+### llama-swap servers
+
+llama-swap only reports a model's context size while the model is loaded. To advertise every model's size, the server admin can add a `capabilities` block to each model in the llama-swap config (v225 or later). The listing then includes the context size, tool support and input types:
+
+```yaml
+models:
+  qwen3.6-35b-a3b:
+    cmd: llama-server --port ${PORT} -m /models/Qwen3.6-35B-A3B.gguf --mmproj /models/mmproj.gguf -c 262144
+    capabilities:
+      context: 262144 # the -c value from cmd
+      tools: true
+      in: [text, image] # image only when cmd loads an --mmproj
+      out: [text]
+  whisper:
+    cmd: whisper-server --port ${PORT} -m /models/ggml-large-v3.bin
+    capabilities:
+      in: [audio] # not a chat model, so the plugin skips it
+      out: [text]
+```
+
+Set `context` to the `-c` value in `cmd`. Without `-c`, llama-server chooses the size when it loads the model, and may reduce it to fit in memory.
+
+### Overriding a model
+
+Settings under `provider.local.models`, keyed by `<target>/<model>`, replace what the plugin detected:
+
+```json
+{
+  "provider": {
+    "local": {
+      "models": {
+        "swap/qwen3.6-35b-a3b": {
+          "limit": { "context": 262144, "output": 32000 },
+          "modalities": { "input": ["text", "image"] }
+        }
+      }
+    }
+  }
+}
+```
+
+This works for any OpenCode model field, such as `name`, `limit`, `modalities`, `attachment`, `tool_call`, `reasoning`, `options` or `variants`. OpenCode requires both `context` and `output` when `limit` is set.
+
 ## Notes
 
 - Model detection is runtime-based, not static

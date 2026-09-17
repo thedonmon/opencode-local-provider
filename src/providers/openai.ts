@@ -70,6 +70,18 @@ export function modelFromListing(item: ModelItem): LocalModel {
   }
 }
 
+// Speech, image, reranker and embedding models show up in /v1/models too, but
+// OpenCode can only chat with models that take and return text. Models that
+// don't describe themselves are kept.
+export function isChatModel(item: ModelItem) {
+  if (capabilityList(item.capabilities).some((name) => ["reranker", "embedding", "embeddings"].includes(name))) {
+    return false
+  }
+  const input = strings(field(item.architecture, "input_modalities"))
+  const output = strings(field(item.architecture, "output_modalities"))
+  return (!input.length || input.includes("text")) && (!output.length || output.includes("text"))
+}
+
 export async function listModels(url: string, headers?: Record<string, string>) {
   const res = await fetch(url + "/v1/models", {
     headers,
@@ -89,7 +101,7 @@ async function detect(url: string, headers?: Record<string, string>) {
 }
 
 async function probe(url: string, headers?: Record<string, string>): Promise<LocalModel[]> {
-  return (await listModels(url, headers)).map(modelFromListing)
+  return (await listModels(url, headers)).filter(isChatModel).map(modelFromListing)
 }
 
 const openai: ProviderImpl = {

@@ -1,4 +1,7 @@
-import { describe, expect, mock, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
+import { mkdtemp, readFile, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import type { Config, PluginInput } from "@opencode-ai/plugin"
 
 import { saveProviderTarget } from "../../src/config"
@@ -17,7 +20,9 @@ function fakeClient(fetchImpl?: typeof fetch) {
   return { client: client as unknown as PluginInput["client"], logs }
 }
 
-function swapServer(key: string) {
+// A llama-swap server with one model. `state.running` controls whether it is
+// loaded; while it is, the server reports its real context size.
+function swapServer(key: string, state: { running: boolean; listedContext?: number } = { running: false, listedContext: 65536 }) {
   return mock(async (input: string | URL | Request, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
     if (new Headers(init?.headers).get("Authorization") !== `Bearer ${key}`) {
@@ -25,13 +30,46 @@ function swapServer(key: string) {
     }
     if (url === "https://swap.example.com/v1/models") {
       return Response.json({
-        data: [{ id: "qwen", owned_by: "llama-swap", name: "Qwen", context_length: 65536 }],
+        data: [{ id: "qwen", owned_by: "llama-swap", name: "Qwen", context_length: state.listedContext }],
       })
     }
-    if (url === "https://swap.example.com/running") return Response.json({ running: [] })
+    if (url === "https://swap.example.com/running") {
+      return Response.json({ running: state.running ? [{ model: "qwen", state: "ready" }] : [] })
+    }
+    if (url === "https://swap.example.com/upstream/qwen/props" && state.running) {
+      return Response.json({ default_generation_settings: { n_ctx: 262144 }, modalities: { vision: true } })
+    }
     return new Response(null, { status: 404 })
   }) as unknown as typeof fetch
 }
+
+function swapConfig(extra: Record<string, unknown> = {}): Config {
+  return {
+    provider: {
+      local: {
+        options: {
+          includeDefaults: false,
+          targets: { swap: { url: "https://swap.example.com", apiKey: "secret", includeUnloaded: true } },
+        },
+        ...extra,
+      },
+    },
+  }
+}
+
+let cacheHome: string
+const originalCacheHome = process.env.XDG_CACHE_HOME
+
+beforeEach(async () => {
+  cacheHome = await mkdtemp(join(tmpdir(), "local-provider-cache-"))
+  process.env.XDG_CACHE_HOME = cacheHome
+})
+
+afterEach(async () => {
+  if (originalCacheHome === undefined) delete process.env.XDG_CACHE_HOME
+  else process.env.XDG_CACHE_HOME = originalCacheHome
+  await rm(cacheHome, { recursive: true, force: true })
+})
 
 describe("config hook", () => {
   test("probes keyed targets and sends the key with their models", async () => {
@@ -58,10 +96,106 @@ describe("config hook", () => {
 
       const model = cfg.provider!.local!.models!["swap/qwen"]!
       expect(model.name).toBe("Qwen (swap)")
-      expect(model.limit).toEqual({ context: 65536, output: 8192 })
+      expect(model.limit).toEqual({ context: 65536, output: 16384 })
       expect(model.headers).toEqual({ Authorization: "Bearer secret" })
       // `provider.api` is read by OpenCode at runtime but missing from the SDK config type.
       expect(model.provider as unknown).toEqual({ npm: "@ai-sdk/openai-compatible", api: "https://swap.example.com/v1" })
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  test("lets model settings from config override what the probe found", async () => {
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = swapServer("secret")
+    const { client } = fakeClient()
+
+    try {
+      const hooks = await LocalProviderPlugin({ client, serverUrl: new URL("http://opencode.test") } as PluginInput)
+      const cfg = swapConfig({
+        models: {
+          "swap/qwen": {
+            name: "My Qwen",
+            limit: { context: 200000, output: 20000 },
+            modalities: { input: ["text", "image"] },
+            options: { temperature: 0.6 },
+          },
+        },
+      })
+
+      await hooks.config!(cfg)
+
+      const model = cfg.provider!.local!.models!["swap/qwen"]!
+      expect(model.id).toBe("qwen")
+      expect(model.name).toBe("My Qwen")
+      expect(model.limit).toEqual({ context: 200000, output: 20000 })
+      expect(model.modalities).toEqual({ input: ["text", "image"], output: ["text"] })
+      expect(model.attachment).toBe(true)
+      expect(model.options).toEqual({ temperature: 0.6, target: "swap" })
+      expect(model.headers).toEqual({ Authorization: "Bearer secret" })
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  test("remembers what a loaded model reported once it is swapped out", async () => {
+    const originalFetch = globalThis.fetch
+    const state = { running: true }
+    globalThis.fetch = swapServer("secret", state)
+    const { client } = fakeClient()
+
+    try {
+      const hooks = await LocalProviderPlugin({ client, serverUrl: new URL("http://opencode.test") } as PluginInput)
+
+      const loaded = swapConfig()
+      await hooks.config!(loaded)
+      expect(loaded.provider!.local!.models!["swap/qwen"]!.limit).toEqual({ context: 262144, output: 32000 })
+      expect(JSON.parse(await readFile(join(cacheHome, "opencode-local-provider", "models.json"), "utf8"))).toEqual({
+        "https://swap.example.com/v1": { qwen: { context: 262144, toolcall: false, vision: true } },
+      })
+
+      state.running = false
+      const swapped = swapConfig()
+      await hooks.config!(swapped)
+      const model = swapped.provider!.local!.models!["swap/qwen"]!
+      expect(model.limit).toEqual({ context: 262144, output: 32000 })
+      expect(model.attachment).toBe(true)
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  test("uses the default context for a model it has never seen loaded", async () => {
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = swapServer("secret", { running: false })
+    const { client } = fakeClient()
+
+    try {
+      const hooks = await LocalProviderPlugin({ client, serverUrl: new URL("http://opencode.test") } as PluginInput)
+      const cfg = swapConfig()
+      await hooks.config!(cfg)
+      expect(cfg.provider!.local!.models!["swap/qwen"]!.limit).toEqual({ context: 32768, output: 8192 })
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  test("does not write into the provider object it was given", async () => {
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = swapServer("secret")
+    const { client } = fakeClient()
+
+    try {
+      const hooks = await LocalProviderPlugin({ client, serverUrl: new URL("http://opencode.test") } as PluginInput)
+      // OpenCode's per-instance config can share this object with its cached
+      // global config.
+      const shared = swapConfig().provider!
+      const cfg: Config = { provider: shared }
+
+      await hooks.config!(cfg)
+
+      expect(cfg.provider!.local!.models!["swap/qwen"]).toBeDefined()
+      expect(shared.local!.models).toBeUndefined()
     } finally {
       globalThis.fetch = originalFetch
     }
