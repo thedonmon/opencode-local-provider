@@ -1,6 +1,7 @@
+import type { Model as V2Model } from "@opencode/plugin"
 import type { Model } from "@opencode-ai/sdk/v2"
 
-import { DEFAULT_CONTEXT, MAX_OUTPUT, OPENAI_COMPATIBLE_NPM } from "./constants"
+import { DEFAULT_CONTEXT, LOCAL_PROVIDER_ID, MAX_OUTPUT, OPENAI_COMPATIBLE_NPM } from "./constants"
 import type { LocalModel } from "./types"
 import { authHeaders, baseURL } from "./url"
 
@@ -166,4 +167,31 @@ export function buildConfig(
       return [key, configItem(target, url, model, prev[key], apiKey)]
     }),
   )
+}
+
+// OpenCode v2 model definitions. User overrides from config are applied by
+// OpenCode after this plugin's transform, so there is nothing to merge here.
+// Each model carries its own target's URL and key because the `local`
+// provider has no credential of its own.
+export function buildModels(target: string, url: string, list: LocalModel[], apiKey?: string): V2Model.Info[] {
+  return list.map((model) => {
+    const input = modalities(model).input
+    return {
+      id: id(target, model.id),
+      modelID: model.id,
+      providerID: LOCAL_PROVIDER_ID,
+      name: name(target, model),
+      capabilities: { tools: model.toolcall, input, output: ["text"] },
+      variants: [],
+      time: { released: 0 },
+      cost: [],
+      status: "active",
+      enabled: true,
+      limit: limits(model.context),
+      settings: {
+        baseURL: baseURL(url),
+        ...(apiKey ? { apiKey } : {}),
+      },
+    } as unknown as V2Model.Info
+  })
 }

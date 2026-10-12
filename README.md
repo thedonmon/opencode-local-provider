@@ -112,6 +112,33 @@ Explicit targets override the built-in defaults when they use the same ID. A key
 
 With `includeDefaults: true`, the built-in default `127.0.0.1` targets are also checked at runtime even though they are not written into config. Set it to `false` if you only use custom targets.
 
+## OpenCode v2
+
+The same package works with OpenCode v2. Setup differs in three places:
+
+- **Adding a server:** run `/connect` → **Local LLM Servers** → **Add Custom Target**. It asks the same questions and checks the server the same way. Each target is saved as one of that integration's connections, with its API key kept in OpenCode's credential store, so you remove a target by removing its connection there.
+- **Config targets:** v2 has no `provider.local.options`. Put `targets`, `includeDefaults` and a shared `apiKey` in the plugin's own entry instead:
+
+  ```json
+  {
+    "plugins": [
+      {
+        "package": "@0xdon0/opencode-local-provider",
+        "options": {
+          "includeDefaults": true,
+          "targets": {
+            "studio": { "url": "http://192.168.1.10:1234/v1", "kind": "lmstudio" }
+          }
+        }
+      }
+    ]
+  }
+  ```
+
+- **Refreshing:** the plugin probes again every minute and whenever a target is added or removed, so you don't need to restart OpenCode to see newly loaded models. Remembered llama-swap context sizes are kept in the plugin's own storage instead of `~/.cache`.
+
+Model overrides use v2's `provider.local.models` config, which OpenCode applies on top of what the plugin detected. Don't add a key to the `local` provider itself in v2: OpenCode would send it to every target in place of each target's own key.
+
 ## How Models Appear
 
 Models are discovered dynamically from each configured target. By default, only **loaded** models are listed.

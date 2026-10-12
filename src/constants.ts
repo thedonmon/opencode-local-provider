@@ -7,3 +7,9 @@ export const LEGACY_TARGET_ID = "default"
 export const DEFAULT_CONTEXT = 32768
 // OpenCode never asks for more output than this per request.
 export const MAX_OUTPUT = 32_000
+// OpenCode v2 keeps targets added from /connect as connections of their own
+// integration. It must not be the provider's integration, or OpenCode would
+// send the newest target's key to every model.
+export const LOCAL_TARGETS_INTEGRATION_ID = "local-targets"
+export const LOCAL_TARGETS_INTEGRATION_NAME = "Local LLM Servers"
+export const V2_OPENAI_COMPATIBLE_PACKAGE = "@opencode/ai/providers/openai-compatible"
