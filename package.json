@@ -1,6 +1,6 @@
 {
   "name": "@0xdon0/opencode-local-provider",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "module",
   "license": "MIT",
   "description": "OpenCode plugin that adds a 'local' provider with auto-detection for Ollama, LMStudio, llama.cpp, vLLM, Exo, llama-swap, oMLX, MLX-VLM, and other OpenAI-compatible servers, with optional per-server API keys",
