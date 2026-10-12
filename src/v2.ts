@@ -4,6 +4,7 @@ import {
   LOCAL_PLUGIN_ID,
   LOCAL_PLUGIN_SERVICE,
   LOCAL_PROVIDER_ID,
+  LOCAL_PROVIDER_INTEGRATION_ID,
   LOCAL_PROVIDER_NAME,
   LOCAL_TARGETS_INTEGRATION_ID,
   LOCAL_TARGETS_INTEGRATION_NAME,
@@ -137,11 +138,12 @@ export const LocalProviderPluginV2 = {
     }
 
     await ctx.provider.transform((editor) => {
-      // A `provider.local` block in config can create the provider first.
+      // A `providers.local` block in config can create the provider first.
       if (editor.get(LOCAL_PROVIDER_ID)) {
         editor.update(LOCAL_PROVIDER_ID, (provider) => {
           provider.activation = "enabled"
           provider.package ||= V2_OPENAI_COMPATIBLE_PACKAGE
+          Object.assign(provider, { integrationID: LOCAL_PROVIDER_INTEGRATION_ID })
         })
         editor.models.set(LOCAL_PROVIDER_ID, source.models)
         return
@@ -152,6 +154,7 @@ export const LocalProviderPluginV2 = {
           name: LOCAL_PROVIDER_NAME,
           activation: "enabled",
           package: V2_OPENAI_COMPATIBLE_PACKAGE,
+          integrationID: LOCAL_PROVIDER_INTEGRATION_ID,
         } as Provider.Info,
         models: source.models,
       })

@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, mock, test } from "bun:test"
 import type { Plugin } from "@opencode/plugin"
 
+import { LOCAL_PROVIDER_INTEGRATION_ID } from "../../src/constants"
 import { LocalProviderPluginV2 } from "../../src/v2"
 
-type Added = { info: { id: string; package: string }; models: { id: string; modelID: string; settings?: Record<string, unknown> }[] }
+type Added = { info: { id: string; package: string; integrationID?: string }; models: { id: string; modelID: string; settings?: Record<string, unknown> }[] }
 type OAuthRegistration = {
   method: { id: string; type: string }
   authorize: (answer: Record<string, unknown>) => Promise<{ mode: string; callback: Promise<unknown> }>
@@ -79,6 +80,9 @@ describe("v2 plugin", () => {
 
     expect(added).toHaveLength(1)
     expect(added[0]!.info.id).toBe("local")
+    // A credential saved under the `local` integration (v1's empty key, after
+    // migration) would replace every model's key, so the provider must not use it.
+    expect(added[0]!.info.integrationID).toBe(LOCAL_PROVIDER_INTEGRATION_ID)
     expect(added[0]!.models.map((model) => [model.id, model.modelID, model.settings])).toEqual([
       ["box/qwen", "qwen", { baseURL: "https://box.example.com/v1", apiKey: "secret" }],
     ])

@@ -37,7 +37,13 @@ https://github.com/user-attachments/assets/8693fd22-c311-4cb4-913b-93d5a531b23c
 opencode plugin --global @0xdon0/opencode-local-provider
 ```
 
-OpenCode will install the package and update the config for you.
+On OpenCode v2:
+
+```bash
+opencode plugin add @0xdon0/opencode-local-provider
+```
+
+OpenCode will install the package and update the config for you. Upgrading from v1? See [Migrating from v1 to v2](#migrating-from-v1-to-v2).
 
 ## Provider Setup
 
@@ -114,7 +120,7 @@ With `includeDefaults: true`, the built-in default `127.0.0.1` targets are also 
 
 ## OpenCode v2
 
-The same package works with OpenCode v2. Setup differs in three places:
+The same package works with OpenCode v2. Setup differs in a few places:
 
 - **Adding a server:** run `/connect` → **Local LLM Servers** → **Add Custom Target**. It asks the same questions and checks the server the same way. Each target is saved as one of that integration's connections, with its API key kept in OpenCode's credential store, so you remove a target by removing its connection there.
 - **Config targets:** v2 has no `provider.local.options`. Put `targets`, `includeDefaults` and a shared `apiKey` in the plugin's own entry instead:
@@ -137,7 +143,83 @@ The same package works with OpenCode v2. Setup differs in three places:
 
 - **Refreshing:** the plugin probes again every minute and whenever a target is added or removed, so you don't need to restart OpenCode to see newly loaded models. Remembered llama-swap context sizes are kept in the plugin's own storage instead of `~/.cache`.
 
-Model overrides use v2's `provider.local.models` config, which OpenCode applies on top of what the plugin detected. Don't add a key to the `local` provider itself in v2: OpenCode would send it to every target in place of each target's own key.
+- **Model overrides:** they go under `providers.local.models` (note `providers`), keyed by `<target>/<model>`, and use v2's model fields. OpenCode applies them on top of what the plugin detected:
+
+  ```json
+  {
+    "providers": {
+      "local": {
+        "models": {
+          "swap/qwen3.6-35b-a3b": {
+            "name": "Qwen 3.6 (swap)",
+            "limit": { "context": 262144, "output": 32000 },
+            "capabilities": { "tools": true, "input": ["text", "image"] }
+          }
+        }
+      }
+    }
+  }
+  ```
+
+  Useful fields are `name`, `limit` (`context`, `input`, `output`), `capabilities` (`tools`, `input`, `output`), `variants` and `disabled`. The v1 fields `modalities`, `tool_call` and `attachment` don't exist in v2.
+
+Each target's key comes from its own config entry or `/connect` connection. A key saved for the `local` provider itself is ignored.
+
+### Migrating from v1 to v2
+
+v2 doesn't read v1's `plugin` or `provider` config keys, so after upgrading the `local` provider shows no models until you move your settings. Your old config stays in the file; v2 just ignores it.
+
+1. Rename `plugin` to `plugins` and turn the plugin's entry into an object.
+2. Move everything under `provider.local.options` (`targets`, `includeDefaults`, `apiKey`) into that entry's `options`.
+3. Move model overrides from `provider.local.models` to `providers.local.models` and switch them to v2's fields (see above).
+
+v1:
+
+```json
+{
+  "plugin": ["@0xdon0/opencode-local-provider"],
+  "provider": {
+    "local": {
+      "options": {
+        "targets": {
+          "swap": {
+            "url": "https://llama-swap.example.com/v1",
+            "kind": "llamaswap",
+            "apiKey": "{env:LLAMA_SWAP_API_KEY}",
+            "includeUnloaded": true
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+v2:
+
+```json
+{
+  "plugins": [
+    {
+      "package": "@0xdon0/opencode-local-provider",
+      "options": {
+        "targets": {
+          "swap": {
+            "url": "https://llama-swap.example.com/v1",
+            "kind": "llamaswap",
+            "apiKey": "{env:LLAMA_SWAP_API_KEY}",
+            "includeUnloaded": true
+          }
+        }
+      }
+    }
+  ]
+}
+```
+
+Instead of editing config, you can also add each server again with `/connect` → **Local LLM Servers** → **Add Custom Target**.
+
+If chats fail with `Missing auth credential: apiKey`, update the plugin to 0.3.1 or later. v1's **Add Custom Target** saved an empty key for the `local` provider, v2 copies it over on upgrade, and earlier versions of the plugin let it replace every target's key.
 
 ## How Models Appear
 
@@ -188,7 +270,7 @@ Set `context` to the `-c` value in `cmd`. Without `-c`, llama-server chooses the
 
 ### Overriding a model
 
-Settings under `provider.local.models`, keyed by `<target>/<model>`, replace what the plugin detected:
+Settings under `provider.local.models`, keyed by `<target>/<model>`, replace what the plugin detected (v1 format; for v2 see [OpenCode v2](#opencode-v2)):
 
 ```json
 {
